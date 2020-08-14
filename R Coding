@@ -1,0 +1,225 @@
+## Importing the data
+
+The files are in excel.  We can go through the trouble of saving each sheet as a csv or we can load in the Excel sheets.
+
+```{r}
+library(readxl)
+UM_Dataset <- read_excel("UM Dataset.xlsx")
+train <- read_xlsx("UM Dataset.xlsx", sheet = 2)
+test <- read_xlsx("UM Dataset.xlsx", sheet = 3)
+other_FC <- read_xlsx("OOS in Previous FC.xlsx", sheet = 1)
+```
+
+## Some preprocessing
+
+```{r}
+#Data cleaning
+trainData <- train
+trainData$ID <- NULL
+trainData$Name <- NULL
+
+testData <- test
+testData$ID <- NULL
+testData$Name <- NULL
+
+#Glm model
+model <- glm(as.factor(OOS_within_30) ~ . , data = trainData, family = binomial)
+pred<- predict(model,testData, type = 'response')
+probs<- ifelse(pred>0.5,'Yes','No')
+table(probs,testData$OOS_within_30)
+#acc=(195+3)/(195+21+9+3)
+#acc
+```
+
+# Try different models random forests, knn
+data=rbind(train, test)
+X=model.matrix(OOS_within_30 ~ . -ID -Name, data)[,-1]
+trainX=X[1:2000,]
+trainX_data_frame <- as.data.frame(trainX)
+OOS_within_30 <- train$OOS_within_30
+trainX_data_frame <- data.frame(trainX_data_frame ,OOS_within_30)
+
+testX=X[2001:2276,]
+testX_data_frame <- as.data.frame(testX)
+OOS_within_30 <- test$OOS_within_30
+testX_data_frame <- data.frame(testX_data_frame ,OOS_within_30)
+modelknn<- train.kknn(as.factor(OOS_within_30) ~-  ., data = trainData)
+predknn<- predict(modelknn,testData)
+table(predknn,testData$OOS_within_30)
+```
+
+
+## A simple glmnet model.
+
+```{r}
+library(glmnet)
+
+# Combine the data into train and test
+data=rbind(train, test)
+X=model.matrix(OOS_within_30~.-ID-Name, data)[,-1]
+
+# Separate the data into train and test
+X2=X[1:2000,]
+X_test=X[2001:2276,]
+
+set.seed(1) # Make the results reproducible
+mod1=cv.glmnet(X2,train$OOS_within_30, family="binomial")
+```
+
+```{r}
+coef(mod1)
+```
+
+
+```{r}
+pred=predict(mod1, newx=X_test, type="response")
+
+acc=vector(,4)
+sensitivity=vector(,4)
+specificity=vector(,4)
+precision=vector(,4)
+
+for (i in 1:100){
+  predprob=pred[1:276]<=i/100
+  t=table(predprob, test$OOS_within_30=="Yes")
+  if (dim(t)[1]==1){
+    if (rownames(t)=="TRUE"){
+      TP=t[1,2]
+      FP=t[1,1]
+      TN=0
+      FN=0
+    } else{
+      TP=0 
+      FP=0
+      TN=t[1,1]
+      FN=t[1,2]   
+    }
+  }else{
+    TP=t[1,1]
+    FP=t[1,2]
+    TN=t[2,2]
+    FN=t[2,1]  
+  }
+  acc[i]=(TP+TN)/sum(t)
+  sensitivity[i]=TP/(TP+FN)
+  specificity[i]=TN/(TN+FP)
+  precision[i]=TP/(TP+FP)
+}
+```
+
+
+```{r}
+acc
+```
+
+### Below I've used Lasso, Ridge model, which resulted the best accuracy
+
+## Train model
+
+#Lasso
+```{r}
+#Original data
+library('ISLR')
+library('glmnet')
+#Combine data
+data=rbind(traindata, testdata)
+X=model.matrix(OOS_within_30~.-ID-Name, data)[,-1]
+
+# Separate the data into train and test
+X_train=X[1:2000,]
+X_test=X[2001:2276,]
+ 
+#get glmnet using lasso
+set.seed(1) 
+mod=cv.glmnet(X_train,traindata$OOS_within_30, family="binomial", alpha=1)
+mod$lambda.min
+#make prediction
+pred=predict(mod,X_test,type='response')
+predprob <- ifelse(pred>0.5,'Yes','No')
+
+library('caret')
+library('e1071')
+confusionMatrix(predprob,testdata$OOS_within_30,positive = 'Yes')
+```
+```{r}
+library('pROC')
+r=roc(testdata$OOS_within_30,pred)
+auc(r)
+plot(r)
+```
+
+#Ridge
+
+```{r}
+#get glmnet using ridge
+set.seed(1) 
+modridge=cv.glmnet(X_train,traindata$OOS_within_30, family="binomial", alpha=0)
+modridge$lambda.min
+#predict(modridge,s=modridge$lambda.min,type='coefficients')
+#make prediction
+pred=predict(modridge,X_test,type='response')
+predprob <- ifelse(pred>0.5,'Yes','No')
+confusionMatrix(predprob,testdata$OOS_within_30,positive = 'Yes')
+```
+```{r}
+library('pROC')
+r=roc(testdata$OOS_within_30,pred)
+auc(r)
+plot(r)
+```
+
+##Prediction
+
+```{r}
+library('ROSE')
+train_both <- ovun.sample(OOS_within_30 ~ ., data = traindata, method = "both",p=0.5, N=2000, seed = 70)$data
+newdata<- rbind(train_both,testdata)
+
+#Contribute new matrix to fit new dataframe
+X=model.matrix(OOS_within_30 ~ . -ID -Name, newdata)[,-1]
+trainX=X[1:2000,]
+testX=X[2001:2276,]
+
+#get glmnet using lasso
+mod2=cv.glmnet(trainX,train_both$OOS_within_30, family="binomial",alpha=1)
+mod2$lambda.min
+
+#make prediction
+pred=predict(mod2,testX,type='response')
+predprob <- ifelse(pred>0.5,'Yes','No')
+confusionMatrix(predprob,testdata$OOS_within_30,positive = 'Yes')
+```
+```{r}
+library('pROC')
+r=roc(testdata$OOS_within_30,pred)
+auc(r)
+#plot(r)
+```
+
+```{r}
+library(ROSE)
+#oversampling
+train_both <- ovun.sample(OOS_within_30 ~ ., data = traindata, method = "both",p=0.5, N=2000, seed = 40)$data
+#table(train_both$OOS_within_30)
+newdata<- rbind(train_both,testdata)
+
+#Contribute new matrix to fit new dataframe
+X=model.matrix(OOS_within_30 ~ . -ID -Name, newdata)[,-1]
+trainX=X[1:2000,]
+testX=X[2001:2276,]
+
+#get glmnet using ridge
+mod2=cv.glmnet(trainX,train_both$OOS_within_30, family="binomial",alpha=0)
+mod2$lambda.min
+
+#make prediction
+pred=predict(mod2,testX,type='response')
+predprob <- ifelse(pred>0.5,'Yes','No')
+confusionMatrix(predprob,testdata$OOS_within_30,positive = 'Yes')
+```
+```{r}
+library('pROC')
+r=roc(testdata$OOS_within_30,pred)
+auc(r)
+#plot(r)
+```
