@@ -8,11 +8,11 @@ Under/Over Sampling:
 
 ## Models
 
-Generalized Linear Model 
-K-Nearest Neighbors
-Decision Tree
-Random Forest
-Text Mining
-Lasso & Ridge
+-Generalized Linear Model 
+-K-Nearest Neighbors
+-Decision Tree
+-Random Forest
+-Text Mining
+-Lasso & Ridge
 
 
